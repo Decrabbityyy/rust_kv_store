@@ -4,7 +4,6 @@
 
 [![Language](https://img.shields.io/badge/language-Rust-orange)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![CI Status](https://img.shields.io/github/workflow/status/yourusername/rust_kv_store/Rust%20CI)](https://github.com/yourusername/rust_kv_store/actions)
 [![Test Coverage](https://img.shields.io/badge/coverage-52%25-yellow)](tarpaulin-report.html)
 
 ## 目录
