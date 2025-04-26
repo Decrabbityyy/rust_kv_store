@@ -76,6 +76,7 @@ jobs:
           echo "目标：${target}"
           cargo build --release -p kv-server --target=${target}
           cargo build --release -p kv-client --target=${target}
+          mkdir -p target/artifacts
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             cp "target/${target}/release/kv-server.exe" "target/artifacts/kv-server-${target}.exe"
             cp "target/${target}/release/kv-client.exe" "target/artifacts/kv-client-${target}.exe"
