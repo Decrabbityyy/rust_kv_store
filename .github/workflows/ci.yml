@@ -81,4 +81,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.program_name }}_${{ matrix.os }}_${{ matrix.arch }}
-          path: target/*
+          path: target/release/*.exe
