@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "kv-common",
+    "kv-server",
+    "kv-client",
+]
+
+resolver = "2"

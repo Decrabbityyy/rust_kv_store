@@ -1,0 +1,27 @@
+# Rust构建输出
+/target/
+
+# Cargo锁文件 - 如果是库项目应该提交，如果是二进制项目则忽略
+Cargo.lock
+
+# Rust备份文件
+**/*.rs.bk
+
+# 编辑器临时文件
+**/*.swp
+**/*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# 运行时生成的数据和日志文件
+/logs/
+/data/
+
+# 配置文件
+/config/
+
+# 其他临时文件
+*.tmp
+*.bak
+*.log
