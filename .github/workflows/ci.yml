@@ -1,129 +1,84 @@
-name: Rust CI
+name: Build Rust Project
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-
-env:
-  CARGO_TERM_COLOR: always
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build and Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    env:
+      program_name: rust_program
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable]
-
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ matrix.rust }}
-        override: true
-        components: rustfmt, clippy
-    
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: ${{ runner.os }}-cargo-
-    
-    - name: Create required directories
-      run: |
-        mkdir -p config data logs
-      shell: bash
-    
-    - name: Check code formatting
-      uses: actions-rs/cargo@v1
-      with:
-        command: fmt
-        args: --all -- --check
-    
-    - name: Clippy check
-      uses: actions-rs/cargo@v1
-      with:
-        command: clippy
-        args: --workspace -- -D warnings
-    
-    - name: Build
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --workspace --verbose
-    
-    - name: Run tests
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --workspace --verbose
-    
-  release:
-    name: Create release binaries
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        arch: [amd64, arm64]
     runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            artifact_name: kv-server
-            asset_name: kv-server-linux
-          - os: ubuntu-latest
-            artifact_name: kv-client
-            asset_name: kv-client-linux
-          - os: windows-latest
-            artifact_name: kv-server.exe
-            asset_name: kv-server-windows.exe
-          - os: windows-latest
-            artifact_name: kv-client.exe
-            asset_name: kv-client-windows.exe
-          - os: macos-latest
-            artifact_name: kv-server
-            asset_name: kv-server-macos
-          - os: macos-latest
-            artifact_name: kv-client
-            asset_name: kv-client-macos
-
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-    
-    - name: Build release binaries
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --release --workspace
-    
-    - name: Upload release asset
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.asset_name }}
-        path: target/release/${{ matrix.artifact_name }}
-    
-    - name: Create GitHub Release
-      if: matrix.os == 'ubuntu-latest' && matrix.artifact_name == 'kv-server'
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          target/release/kv-server
-          target/release/kv-client
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Build for rust
+        shell: bash
+        run: |
+          #处理环境变量
+          arch=${{ matrix.arch }}
+          os=$RUNNER_OS
+          program_name=${{ env.program_name }}
+          
+          #处理不同系统架构差异
+          if [ "$os" == "Linux" ]; then
+            if [ "$arch" == "amd64" ]; then
+              target=x86_64-unknown-linux-gnu
+              linker=gcc
+            elif [ "$arch" == "arm64" ]; then
+              target=aarch64-unknown-linux-gnu
+              linker=aarch64-linux-gnu-gcc
+              sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+            fi
+            suffix=""
+          elif [ "$os" == "Windows" ]; then
+            if [ "$arch" == "amd64" ]; then
+              target=x86_64-pc-windows-msvc
+              linker=link.exe
+            elif [ "$arch" == "arm64" ]; then
+              target=aarch64-pc-windows-msvc
+              linker=link.exe
+            fi
+            suffix=".exe"
+          elif [ "$os" == "macOS" ]; then
+            if [ "$arch" == "amd64" ]; then
+              target=x86_64-apple-darwin
+              linker=clang
+            elif [ "$arch" == "arm64" ]; then
+              target=aarch64-apple-darwin
+              linker=clang
+            fi
+            suffix=""
+          fi
+          echo "当前环境：$os/$arch"
+          echo "当前rust工具链版本"
+          rustc --version
+
+          #添加目标架构配置
+          rustup target add ${target}
+          mkdir -p .cargo
+          cat <<EOL > "./.cargo/config.toml"
+          [target.${target}]
+          linker = "${linker}"
+          EOL
+
+          #开始编译
+          echo "开始编译"
+          echo "目标：${target}"
+          cargo build --release -p kv-server --target=${target}
+          cargo build --release -p kv-client --target=${target}
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.program_name }}_${{ matrix.os }}_${{ matrix.arch }}
+          path: target/*
