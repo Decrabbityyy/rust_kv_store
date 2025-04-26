@@ -77,11 +77,11 @@ jobs:
           cargo build --release -p kv-server --target=${target}
           cargo build --release -p kv-client --target=${target}
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            cp "target/${{ matrix.target }}/release/kv-server.exe" "target/artifacts/kv-server-${{ matrix.target }}.exe"
-            cp "target/${{ matrix.target }}/release/kv-client.exe" "target/artifacts/kv-client-${{ matrix.target }}.exe"
+            cp "target/release/kv-server.exe" "target/artifacts/kv-server-${{ matrix.target }}.exe"
+            cp "target/release/kv-client.exe" "target/artifacts/kv-client-${{ matrix.target }}.exe"
           else
-            cp "target/${{ matrix.target }}/release/kv-server" "target/artifacts/kv-server-${{ matrix.target }}"
-            cp "target/${{ matrix.target }}/release/kv-client" "target/artifacts/kv-client-${{ matrix.target }}"
+            cp "target/release/kv-server" "target/artifacts/kv-server-${{ matrix.target }}"
+            cp "target/release/kv-client" "target/artifacts/kv-client-${{ matrix.target }}"
           fi
 
       - name: Upload Build Artifacts
