@@ -210,10 +210,7 @@ impl CommandHandler {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
                 let mut store = store_guard.lock().unwrap();
-                match store.get_string(&key) {
-                    Some(value) => value,
-                    None => "(nil)".to_string(),
-                }
+                store.get_string(&key).unwrap_or_else(|| "(nil)".to_string())
             },
             Command::Del(key) => {
                 let result = {
@@ -269,10 +266,7 @@ impl CommandHandler {
                 let result = {
                     let store_guard = self.store_manager.get_store();
                     let mut store = store_guard.lock().unwrap();
-                    match store.lpop(&key) {
-                        Some(value) => value,
-                        None => "(nil)".to_string(),
-                    }
+                    store.lpop(&key).unwrap_or_else(|| "(nil)".to_string())
                 };
                 self.persist_data();
                 result
@@ -281,10 +275,7 @@ impl CommandHandler {
                 let result = {
                     let store_guard = self.store_manager.get_store();
                     let mut store = store_guard.lock().unwrap();
-                    match store.rpop(&key) {
-                        Some(value) => value,
-                        None => "(nil)".to_string(),
-                    }
+                    store.rpop(&key).unwrap_or_else(|| "(nil)".to_string())
                 };
                 self.persist_data();
                 result
@@ -321,10 +312,7 @@ impl CommandHandler {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
                 let mut store = store_guard.lock().unwrap();
-                match store.hget(&key, &field) {
-                    Some(value) => value,
-                    None => "(nil)".to_string(),
-                }
+                store.hget(&key, &field).unwrap_or_else(|| "(nil)".to_string())
             },
             Command::HDel(key, field) => {
                 let result = {

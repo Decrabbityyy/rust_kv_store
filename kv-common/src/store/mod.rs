@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use crate::config::Settings;
-
+use base64::prelude::*;
 // 存储系统中支持的数据类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
@@ -669,7 +669,7 @@ impl StoreManager {
     }
     
     fn get_key_file_path(&self, key: &str) -> String {
-        format!("{}/{}.json", self.disk_base_path, base64::encode(key))
+        format!("{}/{}.json", self.disk_base_path, BASE64_STANDARD.encode(key))
     }
     
     pub fn should_check_low_frequency(&self) -> bool {

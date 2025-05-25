@@ -102,11 +102,8 @@ impl Server {
                 
                 let store = self.store_manager.get_store();
                 let store = store.lock().unwrap();
-                
-                match store.get(key) {
-                    Some(value) => value,
-                    None => "(nil)".to_string(),
-                }
+
+                store.get(key).unwrap_or_else(|| "(nil)".to_string())
             },
             _ => format!("ERROR: Unknown command '{}'", parts[0]),
         }

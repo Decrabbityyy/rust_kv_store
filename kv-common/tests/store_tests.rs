@@ -375,7 +375,7 @@ fn test_store_serialization_error_handling() {
     let serialized_data = store.serialize().unwrap();
     
     // 创建一个不存在的目录路径来测试写入错误
-    let result = std::fs::write("/nonexistent_dir/test.dat", serialized_data);
+    let result = fs::write("/nonexistent_dir/test.dat", serialized_data);
     assert!(result.is_err());
 }
 

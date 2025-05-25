@@ -26,7 +26,7 @@ impl TestClient {
         }
     }
     
-    fn connect(&mut self) -> std::io::Result<()> {
+    fn connect(&mut self) -> io::Result<()> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(addr)?;
         self.stream = Some(stream);

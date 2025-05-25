@@ -6,7 +6,5 @@ edition = "2021"
 [dependencies]
 kv-common = { path = "../kv-common" }
 log = "0.4"
-simplelog = "0.12"
-config = "0.13"
-clap = "2.33"
+clap = { version = "4.5.30", features = ["derive"] }
 winapi = { version = "0.3", features = ["wincon", "consoleapi"] }
