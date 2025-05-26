@@ -1,4 +1,4 @@
-use kv_common::config::{Settings, ServerConfig, PersistenceConfig, LoggingConfig, StorageConfig, MemoryConfig};
+use kv_common::config::{Settings, ServerConfig, PersistenceConfig, LoggingConfig, StorageConfig, MemoryConfig, PersistenceMode};
 use std::fs;
 use std::path::Path;
 
@@ -13,7 +13,7 @@ fn test_config_default_values() {
     
     // 验证持久化默认配置
     assert_eq!(config.persistence.data_file, "data/storage.dat");
-    assert_eq!(config.persistence.mode, "on_change");
+    assert!(matches!(config.persistence.mode, PersistenceMode::OnChange));
     assert_eq!(config.persistence.interval_seconds, 300);
     
     // 验证日志默认配置
@@ -21,7 +21,7 @@ fn test_config_default_values() {
     assert_eq!(config.logging.level, "info");
     
     // 验证存储默认配置
-    assert_eq!(config.storage.enable_expiry, true);
+    assert_eq!(config.storage.enable_default_expiry, true);
     assert_eq!(config.storage.default_expiry_seconds, 3600);
     
     // 验证内存优化默认配置
@@ -44,11 +44,11 @@ fn test_config_create_directories() {
         },
         persistence: PersistenceConfig {
             data_file: format!("{}/test.dat", test_data_dir),
-            mode: "on_change".to_string(),
+            mode: PersistenceMode::OnChange,
             interval_seconds: 300,
         },
         storage: StorageConfig {
-            enable_expiry: true,
+            enable_default_expiry: true,
             default_expiry_seconds: 3600,
         },
         memory: MemoryConfig {

@@ -1,4 +1,6 @@
-use std::collections::{HashMap, VecDeque, BTreeMap};
+mod wal;
+
+use std::collections::{HashMap, VecDeque, BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,8 @@ pub enum DataType {
     List(VecDeque<String>),
     // 哈希类型
     Hash(HashMap<String, String>),
+    // 集合类型
+    Set(HashSet<String>),
 }
 
 // 数据项元信息
@@ -155,7 +159,7 @@ impl Store {
     fn apply_default_expiry(&mut self, key: &str) {
         // 只有当配置存在且启用过期功能时才应用
         if let Some(settings) = &self.settings {
-            if settings.storage.enable_expiry && settings.storage.default_expiry_seconds > 0 {
+            if settings.storage.enable_default_expiry && settings.storage.default_expiry_seconds > 0 {
                 let current_time = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -489,6 +493,63 @@ impl Store {
             _ => false,
         }
     }
+    
+    // 集合操作
+    
+    pub fn sadd(&mut self, key: String, value: Vec<String>) -> bool {
+        self.record_access(&key);
+        self.disk_keys.remove(&key);
+
+        match self.data.get_mut(&key) {
+            Some(DataType::Set(set)) => {
+                let initial_size = set.len();
+                for v in value {
+                    set.insert(v);
+                }
+                set.len() > initial_size
+            }
+            Some(_) => {
+                let mut set = HashSet::new();
+                for v in value {
+                    set.insert(v);
+                }
+                self.data.insert(key, DataType::Set(set));
+                true
+            }
+            None => {
+                let mut set = HashSet::new();
+                for v in value {
+                    set.insert(v);
+                }
+                self.data.insert(key, DataType::Set(set));
+                true
+            }
+        }
+    }
+    
+    pub fn smembers(&mut self, key: &str) -> Option<HashSet<String>> {
+        self.record_access(key);
+        match self.data.get(key) {
+            Some(DataType::Set(set)) => Some(set.clone()),
+            _ => None,
+        }
+    }
+    
+    pub fn smember_query(&mut self, key: &str, value: &str) -> bool {
+        self.record_access(key);
+        match self.data.get(key) {
+            Some(DataType::Set(set)) => set.contains(value),
+            _ => false,
+        }
+    }
+    
+    pub fn srem(&mut self, key: &str, value: &str) -> bool {
+        self.record_access(key);
+        match self.data.get_mut(key) {
+            Some(DataType::Set(set)) => set.remove(value),
+            _ => false,
+        }
+    }
 
     // 低频数据管理方法
     pub fn get_low_frequency_keys(&self, access_threshold: u64, idle_time_threshold: u64, max_memory_keys: usize) -> Vec<String> {
@@ -817,9 +878,17 @@ impl StoreManager {
     }
     
     // 启动后台定期检查任务
-    pub fn start_background_check(&self, check_interval: u64) -> std::thread::JoinHandle<()> {
+    pub fn start_background_check(&self, check_interval: u64) -> Option<std::thread::JoinHandle<()>> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static STARTED: AtomicBool = AtomicBool::new(false);
+    
+        if STARTED.swap(true, Ordering::SeqCst) {
+            // 已经启动过，直接返回 None
+            return None;
+        }
+    
         let store_manager = self.clone();
-        std::thread::spawn(move || {
+        Some(std::thread::spawn(move || {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(check_interval));
                 
@@ -831,7 +900,7 @@ impl StoreManager {
                     eprintln!("后台内存优化检查失败: {}", e);
                 }
             }
-        })
+        }))
     }
     
     // 批量预加载低频率使用的键

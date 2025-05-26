@@ -11,17 +11,22 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistenceMode {
+    None,
+    OnChange,
+    Interval,
+}
+#[derive(Debug, Deserialize)]
 pub struct PersistenceConfig {
     pub data_file: String,
-    #[allow(dead_code)]
-    pub mode: String,
-    #[allow(dead_code)]
+    pub mode: PersistenceMode,
     pub interval_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
-    pub enable_expiry: bool,
+    pub enable_default_expiry: bool,
     pub default_expiry_seconds: i64,
 }
 
@@ -78,8 +83,8 @@ mode = "on_change"
 interval_seconds = 300
 
 [storage]
-# 是否启用键过期
-enable_expiry = true
+# 是否默认启用键过期
+enable_default_expiry = false
 # 默认键过期时间(秒)
 default_expiry_seconds = 3600
 

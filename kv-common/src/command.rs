@@ -8,7 +8,7 @@ pub enum Command {
     Set(String, String),
     Get(String),
     Del(String),
-    
+
     // 列表命令
     LPush(String, String),
     RPush(String, String),
@@ -17,18 +17,33 @@ pub enum Command {
     LPop(String),
     RPop(String),
     LDel(String),
-    
+
     // 哈希命令
     HSet(String, String, String),
     HGet(String, String),
     HDel(String, String),
     HDelKey(String),
-    
+
+    // 集合命令
+    SAdd(String, Vec<String>),
+    SMembers(String),
+    SIsMember(String, String),
+    SRem(String, String),
+
+    // 持久化
+    Save,
+    BgSave,
+    FlushDB,
+
+    // 过期
+    Expire(String, u64),
+    DDL(String),
+
     // 其他命令
     Ping,
     Help,
     HelpCommand(String),
-    
+
     // 无效命令
     Invalid(String),
 }
@@ -46,16 +61,16 @@ impl CommandHandler {
             data_file,
         }
     }
-    
+
     // 解析命令字符串
     pub fn parse_command(&self, input: &str) -> Command {
         let input = input.trim();
         let parts: Vec<&str> = input.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return Command::Invalid("Empty command".to_string());
         }
-        
+
         match parts[0].to_lowercase().as_str() {
             // 字符串命令
             "set" => {
@@ -63,36 +78,36 @@ impl CommandHandler {
                     Command::Invalid("Usage: SET key value [EX seconds]".to_string())
                 } else {
                     let key = parts[1].to_string();
-                    
+
                     // 检查是否有EX选项
-                    if parts.len() >= 5 && parts[parts.len()-2].to_uppercase() == "EX" {
-                        if let Ok(seconds) = parts[parts.len()-1].parse::<u64>() {
+                    if parts.len() >= 5 && parts[parts.len() - 2].to_uppercase() == "EX" {
+                        if let Ok(seconds) = parts[parts.len() - 1].parse::<u64>() {
                             // 如果有EX选项，value是除了key、EX和seconds之外的所有部分
-                            let value = parts[2..parts.len()-2].join(" ");
+                            let value = parts[2..parts.len() - 2].join(" ");
                             return Command::Set(key, value + " EX " + &seconds.to_string());
                         }
                     }
-                    
+
                     // 没有EX选项或EX选项无效
                     let value = parts[2..].join(" ");
                     Command::Set(key, value)
                 }
-            },
+            }
             "get" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: GET key".to_string())
                 } else {
                     Command::Get(parts[1].to_string())
                 }
-            },
+            }
             "del" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: DEL key".to_string())
                 } else {
                     Command::Del(parts[1].to_string())
                 }
-            },
-            
+            }
+
             // 列表命令
             "lpush" => {
                 if parts.len() < 3 {
@@ -102,7 +117,7 @@ impl CommandHandler {
                     let value = parts[2..].join(" ");
                     Command::LPush(key, value)
                 }
-            },
+            }
             "rpush" => {
                 if parts.len() < 3 {
                     Command::Invalid("Usage: RPUSH key value".to_string())
@@ -111,7 +126,7 @@ impl CommandHandler {
                     let value = parts[2..].join(" ");
                     Command::RPush(key, value)
                 }
-            },
+            }
             "range" => {
                 if parts.len() != 4 {
                     Command::Invalid("Usage: RANGE key start end".to_string())
@@ -122,36 +137,36 @@ impl CommandHandler {
                         _ => Command::Invalid("Start and end must be integers".to_string()),
                     }
                 }
-            },
+            }
             "len" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: LEN key".to_string())
                 } else {
                     Command::Len(parts[1].to_string())
                 }
-            },
+            }
             "lpop" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: LPOP key".to_string())
                 } else {
                     Command::LPop(parts[1].to_string())
                 }
-            },
+            }
             "rpop" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: RPOP key".to_string())
                 } else {
                     Command::RPop(parts[1].to_string())
                 }
-            },
+            }
             "ldel" => {
                 if parts.len() != 2 {
                     Command::Invalid("Usage: LDEL key".to_string())
                 } else {
                     Command::LDel(parts[1].to_string())
                 }
-            },
-            
+            }
+
             // 哈希命令
             "hset" => {
                 if parts.len() < 4 {
@@ -162,14 +177,14 @@ impl CommandHandler {
                     let value = parts[3..].join(" ");
                     Command::HSet(key, field, value)
                 }
-            },
+            }
             "hget" => {
                 if parts.len() != 3 {
                     Command::Invalid("Usage: HGET key field".to_string())
                 } else {
                     Command::HGet(parts[1].to_string(), parts[2].to_string())
                 }
-            },
+            }
             "hdel" => {
                 if parts.len() == 2 {
                     Command::HDelKey(parts[1].to_string())
@@ -178,8 +193,60 @@ impl CommandHandler {
                 } else {
                     Command::Invalid("Usage: HDEL key [field]".to_string())
                 }
-            },
-            
+            }
+            "sadd"=>{
+                if parts.len() < 3 {
+                    Command::Invalid("Usage: SADD key value1 [value2 ...]".to_string())
+                } else {
+                    let key = parts[1].to_string();
+                    let values = parts[2..].iter().map(|s| s.to_string()).collect();
+                    Command::SAdd(key, values)
+                }
+            }
+            "smembers" => {
+                if parts.len() != 2 {
+                    Command::Invalid("Usage: SMEMBERS key".to_string())
+                } else {
+                    Command::SMembers(parts[1].to_string())
+                }
+            }   
+            "sismember" => {
+                if parts.len() != 3 {
+                    Command::Invalid("Usage: SISMEMBER key value".to_string())
+                } else {
+                    Command::SIsMember(parts[1].to_string(), parts[2].to_string())
+                }
+            }
+            "srem" => {
+                if parts.len() != 3 {
+                    Command::Invalid("Usage: SREM key value".to_string())
+                } else {
+                    Command::SRem(parts[1].to_string(), parts[2].to_string())
+                }
+            }
+            "save" => Command::Save,
+            "bgsave" => Command::BgSave,
+            "flushdb" => Command::FlushDB,
+            "expire" => {
+                if parts.len() != 3 {
+                    Command::Invalid("Usage: EXPIRE key seconds".to_string())
+                } else {
+                    let key = parts[1].to_string();
+                    match parts[2].parse::<u64>() {
+                        Ok(seconds) => Command::Expire(key, seconds),
+                        Err(_) => {
+                            Command::Invalid("Seconds must be a positive integer".to_string())
+                        }
+                    }
+                }
+            }
+            "ddl" => {
+                if parts.len() != 2 {
+                    Command::Invalid("Usage: DDL key".to_string())
+                } else {
+                    Command::DDL(parts[1].to_string())
+                }
+            }
             // 其他命令
             "ping" => Command::Ping,
             "help" => {
@@ -188,11 +255,11 @@ impl CommandHandler {
                 } else {
                     Command::HelpCommand(parts[1].to_string())
                 }
-            },
+            }
             _ => Command::Invalid(format!("Unknown command: {}", parts[0])),
         }
     }
-    
+
     // 执行命令
     pub fn execute_command(&self, command: Command) -> String {
         match command {
@@ -205,13 +272,15 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::Get(key) => {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
                 let mut store = store_guard.lock().unwrap();
-                store.get_string(&key).unwrap_or_else(|| "(nil)".to_string())
-            },
+                store
+                    .get_string(&key)
+                    .unwrap_or_else(|| "(nil)".to_string())
+            }
             Command::Del(key) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -224,8 +293,8 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
-            
+            }
+
             // 列表命令
             Command::LPush(key, value) => {
                 let result = {
@@ -235,7 +304,7 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::RPush(key, value) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -244,7 +313,7 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::Range(key, start, end) => {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
@@ -255,13 +324,13 @@ impl CommandHandler {
                 } else {
                     values.join("\n")
                 }
-            },
+            }
             Command::Len(key) => {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
                 let mut store = store_guard.lock().unwrap();
                 store.llen(&key).to_string()
-            },
+            }
             Command::LPop(key) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -270,7 +339,7 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::RPop(key) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -279,7 +348,7 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::LDel(key) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -292,8 +361,8 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
-            
+            }
+
             // 哈希命令
             Command::HSet(key, field, value) => {
                 let result = {
@@ -307,13 +376,15 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::HGet(key, field) => {
                 let store_guard = self.store_manager.get_store();
                 // 需要可变引用以更新访问统计
                 let mut store = store_guard.lock().unwrap();
-                store.hget(&key, &field).unwrap_or_else(|| "(nil)".to_string())
-            },
+                store
+                    .hget(&key, &field)
+                    .unwrap_or_else(|| "(nil)".to_string())
+            }
             Command::HDel(key, field) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -326,7 +397,7 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
+            }
             Command::HDelKey(key) => {
                 let result = {
                     let store_guard = self.store_manager.get_store();
@@ -339,8 +410,94 @@ impl CommandHandler {
                 };
                 self.persist_data();
                 result
-            },
-            
+            }
+            Command::SAdd(key, value) => {
+                let result = {
+                    let store_guard = self.store_manager.get_store();
+                    let mut store = store_guard.lock().unwrap();
+                    if store.sadd(key, value) {
+                        "1".to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                };
+                self.persist_data();
+                result
+            }
+            Command::SMembers(key) => {
+                let store_guard = self.store_manager.get_store();
+                let mut store = store_guard.lock().unwrap();
+                let members = store.smembers(&key);
+                match members {
+                    Some(members) if !members.is_empty() => members.into_iter().collect::<Vec<String>>().join("\n"),
+                    _ => "(empty set)".to_string(),
+                }
+            }
+            Command::SIsMember(key, value) => {
+                let store_guard = self.store_manager.get_store();
+                let mut store = store_guard.lock().unwrap();
+                if store.smember_query(&key, &value) {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }
+            }
+            Command::SRem(key, value) => {
+                let result = {
+                    let store_guard = self.store_manager.get_store();
+                    let mut store = store_guard.lock().unwrap();
+                    if store.srem(&key, &value) {
+                        "1".to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                };
+                self.persist_data();
+                result
+            }
+            Command::Save => {
+                self.persist_data();
+                "Saved".to_string()
+            }
+            Command::BgSave => {
+                // 在后台保存数据
+                self.store_manager.start_background_check(60);
+                "Background saving started".to_string()
+            }
+            Command::FlushDB => {
+                let count = {
+                    let store_guard = self.store_manager.get_store();
+                    let mut store = store_guard.lock().unwrap();
+                    store.clean_expired_keys()
+                };
+                self.persist_data();
+                format!("CleanKeys: {}", count)
+            }
+            Command::Expire(key, seconds) => {
+                let result = {
+                    let store_guard = self.store_manager.get_store();
+                    let mut store = store_guard.lock().unwrap();
+                    if store.expire(&key, seconds) {
+                        "OK".to_string()
+                    } else {
+                        "ERROR: Key not found".to_string()
+                    }
+                };
+                self.persist_data();
+                result
+            }
+            Command::DDL(key) => {
+                let result = {
+                    let store_guard = self.store_manager.get_store();
+                    let store = store_guard.lock().unwrap();
+                    match store.ttl(&key) {
+                        -2 => "Key does not exist".to_string(),
+                        -1 => "Key does not expire".to_string(),
+                        ttl => format!("Key expires in {} seconds", ttl),
+                    }
+                };
+                result
+            }
             // 其他命令
             Command::Ping => "PONG".to_string(),
             Command::Help => self.get_help(),
@@ -348,7 +505,7 @@ impl CommandHandler {
             Command::Invalid(msg) => format!("ERROR: {}", msg),
         }
     }
-    
+
     // 持久化数据
     fn persist_data(&self) {
         if let Err(e) = self.store_manager.save_to_file(&self.data_file) {
@@ -357,7 +514,7 @@ impl CommandHandler {
             debug!("Data persisted to {}", self.data_file);
         }
     }
-    
+
     // 获取帮助信息
     fn get_help(&self) -> String {
         let help = r"可用命令:
@@ -385,10 +542,10 @@ impl CommandHandler {
   ping - 测试服务器连接
   help - 获取所有命令帮助
   help [command] - 获取特定命令帮助";
-        
+
         help.to_string()
     }
-    
+
     // 获取特定命令的帮助信息
     fn get_command_help(&self, command: &str) -> String {
         match command.to_lowercase().as_str() {
@@ -404,7 +561,9 @@ impl CommandHandler {
             "ldel" => "ldel [key] - 删除整个链表".to_string(),
             "hset" => "hset [key] [field] [value] - 存储哈希表字段".to_string(),
             "hget" => "hget [key] [field] - 获取哈希表字段值".to_string(),
-            "hdel" => "hdel [key] [field] - 删除哈希表字段\nhdel [key] - 删除整个哈希表".to_string(),
+            "hdel" => {
+                "hdel [key] [field] - 删除哈希表字段\nhdel [key] - 删除整个哈希表".to_string()
+            }
             "ping" => "ping - 测试服务器连接".to_string(),
             "help" => "help - 获取所有命令帮助\nhelp [command] - 获取特定命令帮助".to_string(),
             _ => format!("Unknown command: {}", command),
