@@ -1,6 +1,6 @@
 use kv_common::command::CommandHandler;
 use kv_common::store::StoreManager;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -14,24 +14,52 @@ pub struct Server {
     port: u16,
     store_manager: StoreManager,
     data_file: String,
+    wal_path: String,           // WAL日志存储路径
     running: Arc<AtomicBool>,
 }
 
 impl Server {
     pub fn new(host: String, port: u16, data_file: String) -> Self {
+        // 根据数据文件生成WAL路径
+        let wal_path = std::path::Path::new(&data_file)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("wal")
+            .to_string_lossy()
+            .to_string();
+            
         Server {
             host,
             port,
             store_manager: StoreManager::new(),
             data_file,
+            wal_path,
             running: Arc::new(AtomicBool::new(false)),
         }
     }
 
     // 启动服务器
     pub fn start(&mut self) -> Result<(), String> {
+        // 初始化WAL
+        let wal_dir = std::path::Path::new(&self.wal_path);
+        if !wal_dir.exists() {
+            std::fs::create_dir_all(wal_dir)
+                .map_err(|e| format!("创建WAL目录失败: {}", e))?;
+        }
+        
+        // 使用WAL初始化StoreManager
+        self.store_manager = self.store_manager.clone().with_wal(wal_dir);
+        
+        // 从WAL日志中恢复数据
+        info!("从WAL恢复数据...");
+        if let Err(e) = self.store_manager.recover_from_wal() {
+            warn!("从WAL恢复数据失败: {}", e);
+        }
+        
         // 加载持久化数据
-        self.store_manager.load_from_file(&self.data_file)?;
+        info!("从数据文件加载数据...");
+        self.store_manager.load_from_file(&self.data_file)
+            .map_err(|e| format!("加载数据文件失败: {}", e))?;
         
         // 创建 TCP 监听器
         let addr = format!("{}:{}", self.host, self.port);
@@ -80,7 +108,14 @@ impl Server {
             }
         }
         
-        info!("服务器关闭");
+        // 优雅关闭：创建检查点并保存数据
+        info!("创建WAL检查点和保存数据...");
+        match self.store_manager.save_to_file(&self.data_file) {
+            Ok(_) => info!("数据成功保存到 {}", self.data_file),
+            Err(e) => error!("保存数据失败: {}", e),
+        }
+        
+        info!("服务器已关闭");
         Ok(())
     }
     

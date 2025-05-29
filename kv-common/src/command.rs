@@ -1,5 +1,6 @@
 use crate::store::StoreManager;
 use log::{debug, error};
+use std::thread;
 
 // 表示解析后的命令
 #[derive(Debug, Clone)]
@@ -38,7 +39,15 @@ pub enum Command {
     // 过期
     Expire(String, u64),
     DDL(String),
-
+    
+    // 事务命令
+    Begin,               // 开始事务
+    Commit,              // 提交事务
+    Rollback,            // 回滚事务
+    Checkpoint,          // 创建检查点
+    CompactWal,          // 压缩WAL日志
+    ListTransactions,    // 列出所有活跃事务
+    
     // 其他命令
     Ping,
     Help,
@@ -72,6 +81,14 @@ impl CommandHandler {
         }
 
         match parts[0].to_lowercase().as_str() {
+            // 事务命令
+            "begin" | "multi" => Command::Begin,
+            "commit" | "exec" => Command::Commit,
+            "rollback" | "discard" => Command::Rollback,
+            "checkpoint" => Command::Checkpoint,
+            "compactwal" => Command::CompactWal,
+            "transactions" | "listtx" => Command::ListTransactions,
+            
             // 字符串命令
             "set" => {
                 if parts.len() < 3 {
@@ -262,241 +279,216 @@ impl CommandHandler {
 
     // 执行命令
     pub fn execute_command(&self, command: Command) -> String {
+        // 确定WAL日志路径
+        let wal_path = std::path::Path::new(&self.data_file)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("wal.log");
+            
+        // 尝试使用事务处理器
+        let use_transaction_handler = |f: fn(&crate::transaction_cmd::TransactionCommandHandler) -> Result<String, String>| -> String {
+            // 创建事务处理器
+            let handler = crate::transaction_cmd::TransactionCommandHandler::new(&wal_path);
+            match f(&handler) {
+                Ok(result) => result,
+                Err(e) => format!("ERROR: {}", e)
+            }
+        };
+        
         match command {
-            // 字符串命令
+            // 事务命令
+            Command::Begin => use_transaction_handler(|h| h.begin()),
+            Command::Commit => use_transaction_handler(|h| h.commit()),
+            Command::Rollback => use_transaction_handler(|h| h.rollback()),
+            Command::Checkpoint => use_transaction_handler(|h| h.checkpoint()),
+            Command::CompactWal => use_transaction_handler(|h| h.compact()),
+            Command::ListTransactions => use_transaction_handler(|h| h.list_transactions()),
+            
+            // 字符串命令 - 使用新的StoreManager API
             Command::Set(key, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.set_string(key, value)
-                };
-                self.persist_data();
-                result
+                match self.store_manager.set_string(key, value) {
+                    Ok(result) => result,
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::Get(key) => {
-                let store_guard = self.store_manager.get_store();
-                // 需要可变引用以更新访问统计
-                let mut store = store_guard.lock().unwrap();
-                store
-                    .get_string(&key)
-                    .unwrap_or_else(|| "(nil)".to_string())
+                match self.store_manager.get_string(&key) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => "(nil)".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::Del(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.del_key(&key) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.del_key(&key) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
 
-            // 列表命令
+            // 列表命令 - 使用新的StoreManager API
             Command::LPush(key, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.lpush(key, value).to_string()
-                };
-                self.persist_data();
-                result
+                match self.store_manager.lpush(key, value) {
+                    Ok(len) => len.to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::RPush(key, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.rpush(key, value).to_string()
-                };
-                self.persist_data();
-                result
+                match self.store_manager.rpush(key, value) {
+                    Ok(len) => len.to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::Range(key, start, end) => {
-                let store_guard = self.store_manager.get_store();
-                // 需要可变引用以更新访问统计
-                let mut store = store_guard.lock().unwrap();
-                let values = store.range(&key, start, end);
-                if values.is_empty() {
-                    "(empty list)".to_string()
-                } else {
-                    values.join("\n")
+                match self.store_manager.range(&key, start, end) {
+                    Ok(values) => {
+                        if values.is_empty() {
+                            "(empty list)".to_string()
+                        } else {
+                            values.join("\n")
+                        }
+                    },
+                    Err(e) => format!("ERROR: {}", e)
                 }
             }
             Command::Len(key) => {
-                let store_guard = self.store_manager.get_store();
-                // 需要可变引用以更新访问统计
-                let mut store = store_guard.lock().unwrap();
-                store.llen(&key).to_string()
+                match self.store_manager.llen(&key) {
+                    Ok(len) => len.to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::LPop(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.lpop(&key).unwrap_or_else(|| "(nil)".to_string())
-                };
-                self.persist_data();
-                result
+                match self.store_manager.lpop(&key) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => "(nil)".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::RPop(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.rpop(&key).unwrap_or_else(|| "(nil)".to_string())
-                };
-                self.persist_data();
-                result
+                match self.store_manager.rpop(&key) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => "(nil)".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::LDel(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.ldel(&key) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.ldel(&key) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
 
-            // 哈希命令
+            // 哈希命令 - 使用新的StoreManager API
             Command::HSet(key, field, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.hset(key, field, value) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.hset(key, field, value) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::HGet(key, field) => {
-                let store_guard = self.store_manager.get_store();
-                // 需要可变引用以更新访问统计
-                let mut store = store_guard.lock().unwrap();
-                store
-                    .hget(&key, &field)
-                    .unwrap_or_else(|| "(nil)".to_string())
+                match self.store_manager.hget(&key, &field) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => "(nil)".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::HDel(key, field) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.hdel_field(&key, &field) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.hdel_field(&key, &field) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::HDelKey(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.hdel_key(&key) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.hdel_key(&key) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
+            
+            // 集合命令 - 使用新的StoreManager API
             Command::SAdd(key, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.sadd(key, value) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.sadd(key, value) {
+                    Ok(count) => count.to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::SMembers(key) => {
-                let store_guard = self.store_manager.get_store();
-                let mut store = store_guard.lock().unwrap();
-                let members = store.smembers(&key);
-                match members {
-                    Some(members) if !members.is_empty() => members.into_iter().collect::<Vec<String>>().join("\n"),
-                    _ => "(empty set)".to_string(),
+                match self.store_manager.smembers(&key) {
+                    Ok(members) if !members.is_empty() => {
+                        members.into_iter().collect::<Vec<String>>().join("\n")
+                    },
+                    Ok(_) => "(empty set)".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
                 }
             }
             Command::SIsMember(key, value) => {
-                let store_guard = self.store_manager.get_store();
-                let mut store = store_guard.lock().unwrap();
-                if store.smember_query(&key, &value) {
-                    "1".to_string()
-                } else {
-                    "0".to_string()
+                match self.store_manager.smember_query(&key, &value) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
                 }
             }
             Command::SRem(key, value) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.srem(&key, &value) {
-                        "1".to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.srem(&key, &value) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::Save => {
-                self.persist_data();
-                "Saved".to_string()
+                match self.store_manager.save_to_file(&self.data_file) {
+                    Ok(_) => "Saved".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::BgSave => {
-                // 在后台保存数据
-                self.store_manager.start_background_check(60);
-                "Background saving started".to_string()
+                let data_file = self.data_file.clone();
+                let store_manager = self.store_manager.clone();
+                thread::spawn(move || {
+                    if let Err(e) = store_manager.save_to_file(&data_file) {
+                        error!("Background save failed: {}", e);
+                    } else {
+                        debug!("Background save completed");
+                    }
+                });
+                "Background save started".to_string()
             }
             Command::FlushDB => {
-                let count = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    store.clean_expired_keys()
-                };
-                self.persist_data();
-                format!("CleanKeys: {}", count)
+                // 创建新的空Store并替换现有的
+                let store_guard = self.store_manager.get_store();
+                let mut store = store_guard.lock().unwrap();
+                *store = crate::store::Store::new();
+                
+                // 保存空状态
+                match self.store_manager.save_to_file(&self.data_file) {
+                    Ok(_) => "OK".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::Expire(key, seconds) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let mut store = store_guard.lock().unwrap();
-                    if store.expire(&key, seconds) {
-                        "OK".to_string()
-                    } else {
-                        "ERROR: Key not found".to_string()
-                    }
-                };
-                self.persist_data();
-                result
+                match self.store_manager.expire(&key, seconds) {
+                    Ok(true) => "1".to_string(),
+                    Ok(false) => "0".to_string(),
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             Command::DDL(key) => {
-                let result = {
-                    let store_guard = self.store_manager.get_store();
-                    let store = store_guard.lock().unwrap();
-                    match store.ttl(&key) {
-                        -2 => "Key does not exist".to_string(),
-                        -1 => "Key does not expire".to_string(),
-                        ttl => format!("Key expires in {} seconds", ttl),
-                    }
-                };
-                result
+                match self.store_manager.ttl(&key) {
+                    Ok(ttl) => {
+                        if ttl == -2 {
+                            "Key does not exist".to_string()
+                        } else if ttl == -1 {
+                            "No expiration".to_string()
+                        } else {
+                            format!("TTL: {} seconds", ttl)
+                        }
+                    },
+                    Err(e) => format!("ERROR: {}", e)
+                }
             }
             // 其他命令
             Command::Ping => "PONG".to_string(),
@@ -506,14 +498,7 @@ impl CommandHandler {
         }
     }
 
-    // 持久化数据
-    fn persist_data(&self) {
-        if let Err(e) = self.store_manager.save_to_file(&self.data_file) {
-            error!("Failed to persist data: {}", e);
-        } else {
-            debug!("Data persisted to {}", self.data_file);
-        }
-    }
+    // 持久化数据方法已经被移除，改为直接调用 store_manager 的 save_to_file 方法
 
     // 获取帮助信息
     fn get_help(&self) -> String {
